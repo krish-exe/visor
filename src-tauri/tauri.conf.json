@@ -12,18 +12,16 @@
   "app": {
     "windows": [
       {
-        "title": "Visor",
-        "width": 800,
-        "height": 600,
-        "transparent": true,
+        "label": "main",
+        "fullscreen": false,
+        "resizable": false,
         "decorations": false,
+        "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "resizable": false,
-        "center": false,
-        "visible": true,
-        "focus": false,
-        "fullscreen": false
+        "maximizable": false,
+        "minimizable": false,
+        "closable": true
       }
     ],
     "security": {

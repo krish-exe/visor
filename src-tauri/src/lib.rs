@@ -1,25 +1,12 @@
-use tauri::{Manager, AppHandle, PhysicalPosition, PhysicalSize, Emitter, Window};
+use tauri::{
+    AppHandle,
+    Manager,
+    PhysicalPosition,
+    PhysicalSize,
+    Window,
+    Emitter,
+};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-
-#[tauri::command]
-fn setup_fullscreen_overlay(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        // Get primary monitor
-        if let Ok(Some(monitor)) = window.primary_monitor() {
-            let monitor_size = monitor.size();
-            let monitor_position = monitor.position();
-            
-            // Set window to fullscreen size
-            window.set_size(PhysicalSize::new(monitor_size.width, monitor_size.height))
-                .map_err(|e| e.to_string())?;
-            
-            // Position at monitor origin
-            window.set_position(PhysicalPosition::new(monitor_position.x, monitor_position.y))
-                .map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
 
 #[tauri::command]
 fn set_window_clickthrough(window: Window, ignore: bool) -> Result<(), String> {
@@ -36,17 +23,53 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle();
 
-            // Register Alt+Space global shortcut
+            if let Some(window) = app.get_webview_window("main") {
+                // Disable native title bar and borders
+                window.set_decorations(false).expect("Failed to disable decorations");
+
+                // Disable resizing
+                window.set_resizable(false).expect("Failed to set resizable");
+                window.set_maximizable(false).expect("Failed to set maximizable");
+                window.set_minimizable(false).expect("Failed to set minimizable");
+
+                // Manually size to primary monitor (stable alternative to fullscreen)
+                if let Ok(Some(monitor)) = window.primary_monitor() {
+                    let size = monitor.size();
+                    let position = monitor.position();
+
+                    window
+                        .set_size(PhysicalSize::new(size.width, size.height))
+                        .expect("Failed to set window size");
+
+                    window
+                        .set_position(PhysicalPosition::new(position.x, position.y))
+                        .expect("Failed to set window position");
+                }
+
+                // Register focus event listener to fix white strip artifact on Windows
+                // When window regains focus, Windows may repaint non-client area
+                // We must reassert borderless state to prevent this
+                let window_clone = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(focused) = event {
+                        if *focused {
+                            // Window gained focus - reassert borderless state
+                            if let Err(e) = window_clone.set_decorations(false) {
+                                eprintln!("Failed to reassert decorations on focus: {}", e);
+                            } else {
+                                println!("Focus regained - decorations reasserted");
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Register global shortcut
             app_handle
                 .global_shortcut()
                 .on_shortcut("Alt+Space", move |app: &AppHandle<_>, _shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        // Emit event to frontend to toggle toolbar
-                        if let Err(e) = app.emit("toggle-toolbar", ()) {
-                            eprintln!("Failed to emit toggle-toolbar event: {}", e);
-                        } else {
-                            println!("Alt+Space pressed - emitted toggle-toolbar event");
-                        }
+                        let _ = app.emit("toggle-toolbar", ());
                     }
                 })
                 .expect("Failed to register global shortcut");
@@ -54,7 +77,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            setup_fullscreen_overlay,
             set_window_clickthrough
         ])
         .run(tauri::generate_context!())

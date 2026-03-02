@@ -1,11 +1,29 @@
 import { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import ActivationBar from './components/ActivationBar';
+import SelectionOverlay from './components/SelectionOverlay';
+
+type AppMode = 'idle' | 'toolbar' | 'selecting' | 'overlay';
 
 function App() {
-  const [isToolbarVisible, setIsToolbarVisible] = useState(false); // Start hidden
+  const [mode, setMode] = useState<AppMode>('idle');
+  const [capturedImage, setCapturedImage] = useState<string>('');
+  const [isCapturing, setIsCapturing] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+  console.log("Current mode:", mode);
+}, [mode]);
+
+  // Enforce resize lock at runtime
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    appWindow.setResizable(false).catch(err => console.error('Failed to set resizable:', err));
+    appWindow.setMaximizable(false).catch(err => console.error('Failed to set maximizable:', err));
+    appWindow.setMinimizable(false).catch(err => console.error('Failed to set minimizable:', err));
+    console.log('Window resize lock enforced');
+  }, []);
 
   useEffect(() => {
     // Setup fullscreen overlay on mount
@@ -21,10 +39,22 @@ function App() {
     // Listen for Alt+Space toggle event from backend
     const setupListener = async () => {
       const unlisten = await listen('toggle-toolbar', () => {
-        setIsToolbarVisible(prev => {
-          const newState = !prev;
-          console.log(`Alt+Space: Toolbar ${newState ? 'shown' : 'hidden'}`);
-          return newState;
+        setMode(prev => {
+          // Alt+Space behavior based on current mode
+          if (prev === 'toolbar') {
+            console.log('Alt+Space: toolbar → idle');
+            return 'idle';
+          } else if (prev === 'idle') {
+            console.log('Alt+Space: idle → toolbar');
+            return 'toolbar';
+          } else if (prev === 'overlay') {
+            console.log('Alt+Space: overlay → idle');
+            return 'idle';
+          } else {
+            // selecting → idle (cancel selection)
+            console.log('Alt+Space: selecting → idle');
+            return 'idle';
+          }
         });
       });
 
@@ -39,30 +69,28 @@ function App() {
     };
   }, []);
 
-  // Sync click-through with toolbar visibility (SINGLE SOURCE OF TRUTH)
+  // CRITICAL: Single click-through synchronization
   useEffect(() => {
-    const ignore = !isToolbarVisible;
+    const interactive = (mode === 'toolbar' || mode === 'selecting' || mode === 'overlay');
+    const ignore = !interactive;
+    
     invoke('set_window_clickthrough', { ignore })
       .then(() => {
-        console.log(
-          `Toolbar: ${isToolbarVisible}, Click-through: ${ignore}`
-        );
+        console.log(`Mode: ${mode}, Interactive: ${interactive}, Click-through: ${ignore}`);
       })
       .catch(err => {
         console.error('Failed to set click-through:', err);
       });
-  }, [isToolbarVisible]);
+  }, [mode]);
 
   const handleExtractText = () => {
     console.log('Extract Text clicked - entering selection mode');
-    // Phase 2: Enter selection mode for OCR
-    // Toolbar may minimize/hide to allow screen selection
+    setMode('selecting');
   };
 
   const handleCaptureScreen = () => {
     console.log('Capture Screen clicked - entering selection mode');
-    // Phase 2: Enter selection mode for screenshot
-    // Toolbar may minimize/hide to allow screen selection
+    setMode('selecting');
   };
 
   const handleOpenHub = () => {
@@ -70,10 +98,60 @@ function App() {
     // Phase 5: Open knowledge hub
   };
 
+  // Phase 2: Handle selection complete - capture screen region
+  const handleSelectionComplete = async (rect: { x: number; y: number; width: number; height: number }) => {
+    console.log('Selection complete (CSS pixels):', rect);
+    
+    // Convert CSS pixels to physical pixels for DPI scaling
+    const dpr = window.devicePixelRatio || 1;
+    const physicalRect = {
+      x: Math.round(rect.x * dpr),
+      y: Math.round(rect.y * dpr),
+      width: Math.round(rect.width * dpr),
+      height: Math.round(rect.height * dpr),
+    };
+    
+    console.log(`DPR: ${dpr}, Physical pixels:`, physicalRect);
+    
+    setIsCapturing(true);
+    
+    try {
+      const base64Image = await invoke<string>('capture_region', {
+        x: physicalRect.x,
+        y: physicalRect.y,
+        width: physicalRect.width,
+        height: physicalRect.height,
+      });
+      
+      console.log('Screenshot captured successfully (base64 length):', base64Image.length);
+      setCapturedImage(base64Image);
+      setMode('overlay');
+      
+    } catch (error) {
+      console.error('Failed to capture region:', error);
+      setMode('idle');
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  // Phase 2: Handle selection cancel
+  const handleSelectionCancel = () => {
+    console.log('Selection canceled');
+    setMode('idle');
+  };
+
+  // Handle overlay close
+  const handleOverlayClose = () => {
+    console.log('Overlay closed');
+    setCapturedImage('');
+    setMode('idle');
+  };
+
   // Empty-space click dismisses toolbar only (not chat/bubbles)
   const handleBackdropClick = () => {
-    if (isToolbarVisible) {
-      setIsToolbarVisible(false);
+    if (mode === 'toolbar') {
+      setMode('idle');
       console.log('Empty space clicked - toolbar hidden');
     }
   };
@@ -86,14 +164,44 @@ function App() {
   return (
     <div className="app-container">
       {/* Backdrop - only visible when toolbar is shown, dismisses toolbar on click */}
-      {isToolbarVisible && (
+      {mode === 'toolbar' && (
         <div className="toolbar-backdrop" onClick={handleBackdropClick} />
+      )}
+
+      {/* Phase 2: Selection Overlay - Modal screen selection */}
+      {mode === 'selecting' && (
+        <SelectionOverlay
+          onComplete={handleSelectionComplete}
+          onCancel={handleSelectionCancel}
+          isCapturing={isCapturing}
+        />
+      )}
+
+      {/* Phase 2: Image Overlay - Display captured image */}
+      {mode === 'overlay' && capturedImage && (
+        <div className="image-overlay">
+          <div className="image-overlay-content">
+            <div className="image-overlay-header">
+              <span className="extraction-badge">Extraction Method: Screen Capture</span>
+              <button className="close-button" onClick={handleOverlayClose}>
+                ✕
+              </button>
+            </div>
+            <div className="image-container">
+              <img 
+                src={`data:image/png;base64,${capturedImage}`} 
+                alt="Captured screen region"
+                className="captured-image"
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toolbar (Activation Bar) - Modal command bar */}
       <div 
         ref={barRef}
-        className={`toolbar-container ${isToolbarVisible ? 'visible' : 'hidden'}`}
+        className={`toolbar-container ${mode === 'toolbar' ? 'visible' : 'hidden'}`}
         onClick={handleToolbarClick}
       >
         <ActivationBar
