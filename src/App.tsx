@@ -98,6 +98,15 @@ function App() {
     // Phase 5: Open knowledge hub
   };
 
+  const handleExit = async () => {
+    console.log('Exit clicked - closing application');
+    try {
+      await invoke('exit_app');
+    } catch (error) {
+      console.error('Failed to exit application:', error);
+    }
+  };
+
   // Phase 2: Handle selection complete - capture screen region
   const handleSelectionComplete = async (rect: { x: number; y: number; width: number; height: number }) => {
     console.log('Selection complete (CSS pixels):', rect);
@@ -208,6 +217,7 @@ function App() {
           onExtractText={handleExtractText}
           onCaptureScreen={handleCaptureScreen}
           onOpenHub={handleOpenHub}
+          onExit={handleExit}
         />
       </div>
 
