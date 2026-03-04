@@ -2,229 +2,113 @@ import { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+
 import ActivationBar from './components/ActivationBar';
 import SelectionOverlay from './components/SelectionOverlay';
+import ChatWindowStandalone from './components/ChatWindowStandalone';
 
-type AppMode = 'idle' | 'toolbar' | 'selecting' | 'overlay';
+export default function App() {
+  const params = new URLSearchParams(window.location.search);
+  const windowType = params.get('type');
+  const chatId = params.get('id');
 
-function App() {
-  const [mode, setMode] = useState<AppMode>('idle');
-  const [capturedImage, setCapturedImage] = useState<string>('');
+  // ROUTING: If URL has ?type=chat, render only the standalone chat UI
+  if (windowType === 'chat' && chatId) {
+    const storedImage = localStorage.getItem(`image_${chatId}`);
+    return <ChatWindowStandalone chatId={chatId} initialImage={storedImage} />;
+  }
+
+  // DEFAULT: Render the Overlay/Toolbar app
+  return <OverlayApp />;
+}
+
+function OverlayApp() {
+  const [mode, setMode] = useState<'idle' | 'toolbar' | 'selecting'>('idle');
   const [isCapturing, setIsCapturing] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-  console.log("Current mode:", mode);
-}, [mode]);
 
-  // Enforce resize lock at runtime
   useEffect(() => {
-    const appWindow = getCurrentWindow();
-    appWindow.setResizable(false).catch(err => console.error('Failed to set resizable:', err));
-    appWindow.setMaximizable(false).catch(err => console.error('Failed to set maximizable:', err));
-    appWindow.setMinimizable(false).catch(err => console.error('Failed to set minimizable:', err));
-    console.log('Window resize lock enforced');
+    const win = getCurrentWindow();
+    win.setResizable(false);
+    win.setMaximizable(false);
   }, []);
 
   useEffect(() => {
-    // Setup fullscreen overlay on mount
-    const setupOverlay = async () => {
-      try {
-        await invoke('setup_fullscreen_overlay');
-        console.log('Fullscreen overlay setup complete');
-      } catch (error) {
-        console.error('Failed to setup overlay:', error);
-      }
-    };
-
-    // Listen for Alt+Space toggle event from backend
     const setupListener = async () => {
       const unlisten = await listen('toggle-toolbar', () => {
-        setMode(prev => {
-          // Alt+Space behavior based on current mode
-          if (prev === 'toolbar') {
-            console.log('Alt+Space: toolbar → idle');
-            return 'idle';
-          } else if (prev === 'idle') {
-            console.log('Alt+Space: idle → toolbar');
-            return 'toolbar';
-          } else if (prev === 'overlay') {
-            console.log('Alt+Space: overlay → idle');
-            return 'idle';
-          } else {
-            // selecting → idle (cancel selection)
-            console.log('Alt+Space: selecting → idle');
-            return 'idle';
-          }
-        });
+        setMode(prev => (prev === 'toolbar' ? 'idle' : 'toolbar'));
       });
-
       return unlisten;
     };
-
-    setupOverlay();
-    const unlistenPromise = setupListener();
-
-    return () => {
-      unlistenPromise.then(unlisten => unlisten());
-    };
+    const promise = setupListener();
+    return () => { promise.then(u => u()); };
   }, []);
 
-  // CRITICAL: Single click-through synchronization
   useEffect(() => {
-    const interactive = (mode === 'toolbar' || mode === 'selecting' || mode === 'overlay');
-    const ignore = !interactive;
-    
-    invoke('set_window_clickthrough', { ignore })
-      .then(() => {
-        console.log(`Mode: ${mode}, Interactive: ${interactive}, Click-through: ${ignore}`);
-      })
-      .catch(err => {
-        console.error('Failed to set click-through:', err);
-      });
+    const interactive = mode === 'toolbar' || mode === 'selecting';
+    invoke('set_window_clickthrough', { ignore: !interactive });
   }, [mode]);
 
-  const handleExtractText = () => {
-    console.log('Extract Text clicked - entering selection mode');
-    setMode('selecting');
-  };
-
-  const handleCaptureScreen = () => {
-    console.log('Capture Screen clicked - entering selection mode');
-    setMode('selecting');
-  };
-
-  const handleOpenHub = () => {
-    console.log('Open Hub clicked');
-    // Phase 5: Open knowledge hub
-  };
-
-  const handleExit = async () => {
-    console.log('Exit clicked - closing application');
-    try {
-      await invoke('exit_app');
-    } catch (error) {
-      console.error('Failed to exit application:', error);
-    }
-  };
-
-  // Phase 2: Handle selection complete - capture screen region
-  const handleSelectionComplete = async (rect: { x: number; y: number; width: number; height: number }) => {
-    console.log('Selection complete (CSS pixels):', rect);
-    
-    // Convert CSS pixels to physical pixels for DPI scaling
+  const handleSelectionComplete = async (rect: any) => {
     const dpr = window.devicePixelRatio || 1;
     const physicalRect = {
       x: Math.round(rect.x * dpr),
       y: Math.round(rect.y * dpr),
       width: Math.round(rect.width * dpr),
-      height: Math.round(rect.height * dpr),
+      height: Math.round(rect.height * dpr)
     };
-    
-    console.log(`DPR: ${dpr}, Physical pixels:`, physicalRect);
-    
+
     setIsCapturing(true);
-    
+
     try {
-      const base64Image = await invoke<string>('capture_region', {
-        x: physicalRect.x,
-        y: physicalRect.y,
-        width: physicalRect.width,
-        height: physicalRect.height,
-      });
+      // 1. Capture the image
+      const base64Image = await invoke<string>('capture_region', physicalRect);
       
-      console.log('Screenshot captured successfully (base64 length):', base64Image.length);
-      setCapturedImage(base64Image);
-      setMode('overlay');
+      // 2. Generate unique session ID
+      const chatId = Date.now().toString();
+
+      // 3. Store image context locally for the new window to pick up
+      localStorage.setItem(`image_${chatId}`, base64Image);
+
+      setMode('idle');
       
-    } catch (error) {
-      console.error('Failed to capture region:', error);
+      // 4. Trigger Rust to open a new window
+      await invoke('create_chat_window', { chatId });
+
+    } catch (err) {
+      console.error("Capture Failed:", err);
       setMode('idle');
     } finally {
       setIsCapturing(false);
     }
   };
 
-  // Phase 2: Handle selection cancel
-  const handleSelectionCancel = () => {
-    console.log('Selection canceled');
-    setMode('idle');
-  };
-
-  // Handle overlay close
-  const handleOverlayClose = () => {
-    console.log('Overlay closed');
-    setCapturedImage('');
-    setMode('idle');
-  };
-
-  // Empty-space click dismisses toolbar only (not chat/bubbles)
-  const handleBackdropClick = () => {
-    if (mode === 'toolbar') {
-      setMode('idle');
-      console.log('Empty space clicked - toolbar hidden');
-    }
-  };
-
-  // Prevent clicks on toolbar from dismissing it
-  const handleToolbarClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-  };
-
   return (
-    <div className="app-container">
-      {/* Backdrop - only visible when toolbar is shown, dismisses toolbar on click */}
+    <div className="app-container" style={{ pointerEvents: 'none' }}>
       {mode === 'toolbar' && (
-        <div className="toolbar-backdrop" onClick={handleBackdropClick} />
+        <div className="toolbar-backdrop" onClick={() => setMode('idle')} style={{ pointerEvents: 'auto' }} />
       )}
-
-      {/* Phase 2: Selection Overlay - Modal screen selection */}
       {mode === 'selecting' && (
-        <SelectionOverlay
-          onComplete={handleSelectionComplete}
-          onCancel={handleSelectionCancel}
-          isCapturing={isCapturing}
-        />
-      )}
-
-      {/* Phase 2: Image Overlay - Display captured image */}
-      {mode === 'overlay' && capturedImage && (
-        <div className="image-overlay">
-          <div className="image-overlay-content">
-            <div className="image-overlay-header">
-              <span className="extraction-badge">Extraction Method: Screen Capture</span>
-              <button className="close-button" onClick={handleOverlayClose}>
-                ✕
-              </button>
-            </div>
-            <div className="image-container">
-              <img 
-                src={`data:image/png;base64,${capturedImage}`} 
-                alt="Captured screen region"
-                className="captured-image"
-              />
-            </div>
-          </div>
+        <div style={{ pointerEvents: 'auto' }}>
+          <SelectionOverlay
+            onComplete={handleSelectionComplete}
+            onCancel={() => setMode('idle')}
+            isCapturing={isCapturing}
+          />
         </div>
       )}
-
-      {/* Toolbar (Activation Bar) - Modal command bar */}
-      <div 
+      <div
         ref={barRef}
         className={`toolbar-container ${mode === 'toolbar' ? 'visible' : 'hidden'}`}
-        onClick={handleToolbarClick}
+        style={{ pointerEvents: 'auto' }}
       >
         <ActivationBar
-          onExtractText={handleExtractText}
-          onCaptureScreen={handleCaptureScreen}
-          onOpenHub={handleOpenHub}
-          onExit={handleExit}
+          onExtractText={() => setMode('selecting')}
+          onCaptureScreen={() => setMode('selecting')}
+          onOpenHub={() => {}}
+          onExit={() => invoke('exit_app')}
         />
       </div>
-
-      {/* Future: AI Chat Window - Layer 2 (non-modal, floating, draggable) */}
-      {/* Future: Sticky Bubbles - Layer 3 (persistent, non-blocking) */}
     </div>
   );
 }
-
-export default App;

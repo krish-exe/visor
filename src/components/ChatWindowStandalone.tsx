@@ -1,0 +1,287 @@
+import { useState, useRef, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen, emit } from "@tauri-apps/api/event";
+
+interface Props {
+  chatId: string;
+  initialImage: string | null;
+}
+
+interface Message {
+  role: string;
+  content: string;
+}
+
+export default function ChatWindowStandalone({ initialImage }: Props) {
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [showImagePreview, setShowImagePreview] = useState(false);
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Listen for AI streaming tokens
+  useEffect(() => {
+    const setupListener = async () => {
+      const unlistenToken = await listen<string>("ai-token", (event) => {
+        const token = event.payload;
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === "assistant") {
+            // Append token to existing assistant message
+            return [...prev.slice(0, -1), { ...last, content: last.content + token }];
+          } else {
+            // Create new assistant message
+            return [...prev, { role: "assistant", content: token }];
+          }
+        });
+        
+        // Keep streaming indicator visible while tokens arrive
+        setIsStreaming(true);
+      });
+      
+      // Listen for stream completion (backend emits "ai-complete")
+      const unlistenComplete = await listen("ai-complete", () => {
+        setIsStreaming(false);
+      });
+      
+      // Listen for stream errors
+      const unlistenError = await listen<string>("ai-error", (event) => {
+        const errorMsg = event.payload;
+        setMessages((m) => [
+          ...m,
+          { role: "error", content: `Stream error: ${errorMsg}` },
+        ]);
+        setIsStreaming(false);
+      });
+      
+      return () => {
+        unlistenToken();
+        unlistenComplete();
+        unlistenError();
+      };
+    };
+    const promise = setupListener();
+    return () => { promise.then(cleanup => cleanup()); };
+  }, []);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const send = async () => {
+    if (!input.trim() || isStreaming) return;
+
+    const msg = input;
+    setMessages((m) => [...m, { role: "user", content: msg }]);
+    setInput("");
+    
+    // Set streaming state immediately when message is sent
+    setIsStreaming(true);
+
+    try {
+      await invoke("stream_ai", {
+        textPrompt: msg,
+        imageBase64: initialImage,
+      });
+      // Only set to false after successful completion
+      setIsStreaming(false);
+    } catch (err) {
+      console.error(err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      // Append error message to chat so user sees it
+      setMessages((m) => [
+        ...m,
+        { role: "error", content: `Failed to get AI response: ${errorMsg}` },
+      ]);
+      // Stop streaming state on error
+      setIsStreaming(false);
+    }
+  };
+
+  const handleMinimize = async () => {
+    const win = getCurrentWindow();
+    const pos = await win.outerPosition();
+    
+    // Emit event for future bubble integration
+    await emit("chat-minimized", {
+      x: pos.x,
+      y: pos.y,
+      window: win.label
+    });
+    
+    await win.hide();
+  };
+
+  const handleClose = async () => {
+    const win = getCurrentWindow();
+    await win.close();
+  };
+
+  const handleHeaderMouseDown = async (e: React.MouseEvent) => {
+    // Don't drag if clicking control buttons
+    if ((e.target as HTMLElement).closest('.chat-control-button')) {
+      return;
+    }
+    const win = getCurrentWindow();
+    await win.startDragging();
+  };
+
+  // Render full chat window
+  return (
+    <div
+      style={{
+        pointerEvents: "auto",
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        width: "100%",
+        backdropFilter: "blur(20px)",
+        background: "rgba(24, 24, 27, 0.98)",
+        border: "1px solid rgba(255, 255, 255, 0.1)",
+        borderRadius: "12px",
+        overflow: "hidden",
+        color: "#e4e4e7",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+      }}
+    >
+      {/* Header - Draggable */}
+      <div
+        className="chat-window-header"
+        data-tauri-drag-region
+        onMouseDown={handleHeaderMouseDown}
+      >
+        <div className="chat-window-title">AI Context Chat</div>
+        <div className="chat-window-controls">
+          <button
+            className="chat-control-button minimize-button"
+            onClick={handleMinimize}
+            title="Minimize"
+          >
+            −
+          </button>
+          <button
+            className="chat-control-button"
+            onClick={handleClose}
+            title="Close"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "10px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+          background: "rgba(9, 9, 11, 0.4)",
+        }}
+      >
+        {messages.map((m, i) => {
+          const isUser = m.role === "user";
+          const isError = m.role === "error";
+
+          if (isError) {
+            return (
+              <div key={i} className="chat-error">
+                <span className="error-icon">⚠️</span>
+                <span className="error-text">{m.content}</span>
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={i}
+              className={isUser ? "chat-message chat-message-user" : "chat-message chat-message-assistant"}
+            >
+              <div className="chat-message-content">{m.content}</div>
+            </div>
+          );
+        })}
+        
+        {/* Typing indicator when AI is streaming */}
+        {isStreaming && (
+          <div className="chat-streaming-indicator">
+            <div className="streaming-dot"></div>
+            <div className="streaming-dot"></div>
+            <div className="streaming-dot"></div>
+          </div>
+        )}
+        
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Attachment Bar */}
+      {initialImage && (
+        <div className="chat-attachment-bar">
+          <div className="attachment-label">
+            📎 Image attached
+          </div>
+          <button
+            className="attachment-view-button"
+            onClick={() => setShowImagePreview(true)}
+          >
+            View
+          </button>
+        </div>
+      )}
+
+      {/* Input */}
+      <div className="chat-input-container">
+        <textarea
+          className="chat-input"
+          rows={2}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          placeholder="Ask about this area..."
+          disabled={isStreaming}
+        />
+        <button
+          className="chat-send-button"
+          onClick={send}
+          disabled={isStreaming || !input.trim()}
+        >
+          {isStreaming ? "..." : "Send"}
+        </button>
+      </div>
+
+      {/* Image Preview Overlay */}
+      {showImagePreview && initialImage && (
+        <div className="chat-image-overlay" onClick={() => setShowImagePreview(false)}>
+          <div className="chat-image-overlay-content" onClick={(e) => e.stopPropagation()}>
+            <div className="chat-image-overlay-header">
+              <div className="chat-image-overlay-title">Captured Context</div>
+              <button
+                className="close-button"
+                onClick={() => setShowImagePreview(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="chat-image-overlay-body">
+              <img
+                src={`data:image/png;base64,${initialImage}`}
+                alt="context"
+                className="chat-overlay-image"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
