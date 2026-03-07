@@ -1,1 +1,1 @@
-pub mod bedrock_stream;
+pub mod gemini_stream;

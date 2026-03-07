@@ -14,7 +14,6 @@ use image::{ImageBuffer, RgbaImage};
 use base64::{Engine as _, engine::general_purpose};
 
 mod ai;
-mod aws;
 mod commands;
 
 use commands::ai_commands::stream_ai;
@@ -218,16 +217,7 @@ pub fn run() {
 
             let app_handle = app.handle();
 
-            let bedrock_client = tauri::async_runtime::block_on(async {
-
-                let config =
-                    aws::credential_manager::init_aws_config().await;
-
-                aws_sdk_bedrockruntime::Client::new(&config)
-
-            });
-
-            app.manage(bedrock_client);
+            
 
             // Configure the overlay window
             if let Some(window) = app.get_webview_window("main") {
