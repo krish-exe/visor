@@ -11,7 +11,11 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use screenshots::Screen;
 use image::{ImageBuffer, RgbaImage};
-use base64::{Engine as _, engine::general_purpose};
+//use base64::{Engine as _, engine::general_purpose};
+
+use std::fs;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod ai;
 mod commands;
@@ -134,17 +138,23 @@ fn capture_region(x: i32, y: i32, width: u32, height: u32) -> Result<String, Str
         height
     );
 
-    let mut png_bytes = Vec::new();
+    let cropped = cropped.to_image();
 
-    cropped
-        .to_image()
-        .write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png
-        )
-        .map_err(|e| e.to_string())?;
+let temp_dir = std::env::temp_dir();
 
-    Ok(general_purpose::STANDARD.encode(&png_bytes))
+let timestamp = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap()
+    .as_millis();
+
+let file_path: PathBuf = temp_dir.join(format!("visor_capture_{}.png", timestamp));
+
+cropped
+    .save(&file_path)
+    .map_err(|e| e.to_string())?;
+println!("Saved capture to: {:?}", file_path);
+Ok(file_path.to_string_lossy().to_string())
+
 }
 
 #[tauri::command]
@@ -171,7 +181,7 @@ async fn create_chat_window(
         )
     )
     .title("Visor AI Chat")
-    .inner_size(500.0, 600.0)
+    .inner_size(300.0, 200.0)
     .decorations(false)
     .transparent(true)
     .shadow(false)

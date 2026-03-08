@@ -62,18 +62,18 @@ function OverlayApp() {
 
     try {
       // 1. Capture the image
-      const base64Image = await invoke<string>('capture_region', physicalRect);
+      const imagePath = await invoke<string>('capture_region', physicalRect);
       
       // 2. Generate unique session ID
       const chatId = Date.now().toString();
 
       // 3. Store image context locally for the new window to pick up
-      localStorage.setItem(`image_${chatId}`, base64Image);
+      localStorage.setItem(`image_${chatId}`, imagePath);
 
       setMode('idle');
       
       // 4. Trigger Rust to open a new window
-      await invoke('create_chat_window', { chatId, imageBase64: base64Image });
+      await invoke('create_chat_window', { chatId });
 
     } catch (err) {
       console.error("Capture Failed:", err);

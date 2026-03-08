@@ -2,6 +2,26 @@ import { useState, useRef, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {  emit } from "@tauri-apps/api/event";
 import { createSession, sendChat } from "../api/backend";
+import { convertFileSrc } from "@tauri-apps/api/core";
+
+
+
+async function fileToBase64(path: string) {
+  const res = await fetch(convertFileSrc(path));
+  const blob = await res.blob();
+
+  return new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1]);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+
+
 interface Props {
   chatId: string;
   initialImage: string | null;
@@ -20,6 +40,8 @@ export default function ChatWindowStandalone({ chatId,initialImage }: Props) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+
+  const imageUrl = initialImage ? convertFileSrc(initialImage) : null;
   // Listen for AI streaming tokens
  
 
@@ -44,11 +66,15 @@ useEffect(() => {
   setIsStreaming(true);
 
   try {
-    const response = await sendChat(
-      sessionId,
-      msg,
-      initialImage || undefined
-    );
+    const imageBase64 = initialImage
+  ? await fileToBase64(initialImage)
+  : undefined;
+
+const response = await sendChat(
+  sessionId,
+  msg,
+  imageBase64
+);
 
     setMessages((m) => [
       ...m,
@@ -243,7 +269,7 @@ useEffect(() => {
             </div>
             <div className="chat-image-overlay-body">
               <img
-                src={`data:image/png;base64,${initialImage}`}
+                src={imageUrl ?? ""}
                 alt="context"
                 className="chat-overlay-image"
               />
