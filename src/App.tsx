@@ -6,6 +6,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import ActivationBar from './components/ActivationBar';
 import SelectionOverlay from './components/SelectionOverlay';
 import ChatWindowStandalone from './components/ChatWindowStandalone';
+import HubWindow from './components/HubWindow';
 
 export default function App() {
   const params = new URLSearchParams(window.location.search);
@@ -17,7 +18,9 @@ export default function App() {
     const storedImage = localStorage.getItem(`image_${chatId}`);
     return <ChatWindowStandalone chatId={chatId} initialImage={storedImage} />;
   }
-
+  if (windowType === "hub") {
+  return <HubWindow />;
+}
   // DEFAULT: Render the Overlay/Toolbar app
   return <OverlayApp />;
 }
@@ -105,7 +108,7 @@ function OverlayApp() {
         <ActivationBar
           onExtractText={() => setMode('selecting')}
           onCaptureScreen={() => setMode('selecting')}
-          onOpenHub={() => {}}
+          onOpenHub={() => invoke("create_hub_window")}
           onExit={() => invoke('exit_app')}
         />
       </div>

@@ -53,7 +53,7 @@ export default function ChatWindowStandalone({ chatId,initialImage }: Props) {
   
 
 useEffect(() => {
-  setSessionId(chatId);
+  createSession().then(id => setSessionId(id));
 }, [chatId]);
 
   const send = async () => {

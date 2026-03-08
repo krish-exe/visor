@@ -25,7 +25,7 @@ export default function ActivationBar({ onExtractText, onCaptureScreen, onOpenHu
           onClick={onOpenHub}
           className="activation-bar-button button-hub"
         >
-          Open Hub
+          Chat Hub
         </button>
         <button
           onClick={onExit}

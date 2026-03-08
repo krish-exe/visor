@@ -227,6 +227,34 @@ fn send_image_to_chat(
 }
 
 #[tauri::command]
+async fn create_hub_window(app: AppHandle) -> Result<(), String> {
+
+    let label = "hub";
+
+    if app.get_webview_window(label).is_some() {
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(
+        &app,
+        label,
+        WebviewUrl::App(
+            "index.html?type=hub".into()
+        )
+    )
+    .title("Visor Notes Hub")
+    .inner_size(900.0, 600.0)
+    .decorations(true)
+    .resizable(true)
+    .transparent(false)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+
+#[tauri::command]
 fn set_window_clickthrough(
     window: Window,
     ignore: bool
@@ -292,6 +320,7 @@ pub fn run() {
             set_window_clickthrough,
             capture_region,
             create_chat_window,
+            create_hub_window,
             exit_app,
             stream_ai
 
