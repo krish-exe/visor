@@ -118,7 +118,7 @@ const send = async () => {
   try {
     await invoke("stream_ai", {
       textPrompt: msg,
-      imageBase64: initialImage,
+      imageBase64: contextImage,
     });
   } catch (err) {
     console.error(err);

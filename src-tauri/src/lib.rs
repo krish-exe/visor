@@ -1,8 +1,8 @@
 use tauri::{
     AppHandle,
+    Emitter,
     Manager,
     Window,
-    Emitter,
     WebviewWindow,
     WebviewUrl,
     WebviewWindowBuilder,
@@ -50,7 +50,6 @@ unsafe extern "system" fn subclass_proc(
     lparam: LPARAM
 ) -> LRESULT {
 
-    // Only the overlay window should pass clicks through
     if msg == WM_NCHITTEST {
         return LRESULT(HTTRANSPARENT as isize);
     }
@@ -151,7 +150,7 @@ fn capture_region(x: i32, y: i32, width: u32, height: u32) -> Result<String, Str
 #[tauri::command]
 async fn create_chat_window(
     app: AppHandle,
-    chat_id: String
+    chat_id: String,
 ) -> Result<(), String> {
 
     let label = format!("chat-{}", chat_id);
@@ -160,10 +159,16 @@ async fn create_chat_window(
         return Ok(());
     }
 
+
     let window = WebviewWindowBuilder::new(
         &app,
         &label,
-        WebviewUrl::App(format!("index.html?type=chat&id={}", chat_id).into())
+        WebviewUrl::App(
+            format!(
+                "index.html?type=chat&id={}",
+                chat_id
+            ).into()
+        )
     )
     .title("Visor AI Chat")
     .inner_size(500.0, 600.0)
@@ -177,12 +182,36 @@ async fn create_chat_window(
     .build()
     .map_err(|e| e.to_string())?;
 
-    // Chat window MUST allow interaction
     window
         .set_ignore_cursor_events(false)
         .map_err(|e| e.to_string())?;
 
-    window.set_focus().map_err(|e| e.to_string())?;
+    window
+        .set_focus()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn send_image_to_chat(
+    app: AppHandle,
+    chat_id: String,
+    image: String
+) -> Result<(), String> {
+
+    let label = format!("chat-{}", chat_id);
+
+    if let Some(window) = app.get_webview_window(&label) {
+
+        window.emit(
+            "visor-image",
+            serde_json::json!({
+                "chatId": chat_id,
+                "image": image
+            })
+        ).map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }
@@ -217,9 +246,6 @@ pub fn run() {
 
             let app_handle = app.handle();
 
-            
-
-            // Configure the overlay window
             if let Some(window) = app.get_webview_window("main") {
 
                 window.set_decorations(false).unwrap();
@@ -233,7 +259,6 @@ pub fn run() {
                 }
             }
 
-            // Global shortcut
             app_handle
                 .global_shortcut()
                 .on_shortcut(
@@ -252,7 +277,8 @@ pub fn run() {
         })
 
         .invoke_handler(tauri::generate_handler![
-
+            
+            send_image_to_chat,
             set_window_clickthrough,
             capture_region,
             create_chat_window,

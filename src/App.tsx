@@ -73,7 +73,7 @@ function OverlayApp() {
       setMode('idle');
       
       // 4. Trigger Rust to open a new window
-      await invoke('create_chat_window', { chatId });
+      await invoke('create_chat_window', { chatId, imageBase64: base64Image });
 
     } catch (err) {
       console.error("Capture Failed:", err);

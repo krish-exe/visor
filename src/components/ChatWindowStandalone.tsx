@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { listen, emit } from "@tauri-apps/api/event";
-
+import {  emit } from "@tauri-apps/api/event";
+import { createSession, sendChat } from "../api/backend";
 interface Props {
   chatId: string;
   initialImage: string | null;
@@ -13,93 +12,63 @@ interface Message {
   content: string;
 }
 
-export default function ChatWindowStandalone({ initialImage }: Props) {
+export default function ChatWindowStandalone({ chatId,initialImage }: Props) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
-  
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Listen for AI streaming tokens
-  useEffect(() => {
-    const setupListener = async () => {
-      const unlistenToken = await listen<string>("ai-token", (event) => {
-        const token = event.payload;
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === "assistant") {
-            // Append token to existing assistant message
-            return [...prev.slice(0, -1), { ...last, content: last.content + token }];
-          } else {
-            // Create new assistant message
-            return [...prev, { role: "assistant", content: token }];
-          }
-        });
-        
-        // Keep streaming indicator visible while tokens arrive
-        setIsStreaming(true);
-      });
-      
-      // Listen for stream completion (backend emits "ai-complete")
-      const unlistenComplete = await listen("ai-complete", () => {
-        setIsStreaming(false);
-      });
-      
-      // Listen for stream errors
-      const unlistenError = await listen<string>("ai-error", (event) => {
-        const errorMsg = event.payload;
-        setMessages((m) => [
-          ...m,
-          { role: "error", content: `Stream error: ${errorMsg}` },
-        ]);
-        setIsStreaming(false);
-      });
-      
-      return () => {
-        unlistenToken();
-        unlistenComplete();
-        unlistenError();
-      };
-    };
-    const promise = setupListener();
-    return () => { promise.then(cleanup => cleanup()); };
-  }, []);
+ 
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  
+
+useEffect(() => {
+  setSessionId(chatId);
+}, [chatId]);
+
   const send = async () => {
-    if (!input.trim() || isStreaming) return;
+  if (!input.trim() || isStreaming || !sessionId) return;
 
-    const msg = input;
-    setMessages((m) => [...m, { role: "user", content: msg }]);
-    setInput("");
-    
-    // Set streaming state immediately when message is sent
-    setIsStreaming(true);
+  const msg = input;
 
-    try {
-      await invoke("stream_ai", {
-        textPrompt: msg,
-        imageBase64: initialImage,
-      });
-      // Only set to false after successful completion
-      setIsStreaming(false);
-    } catch (err) {
-      console.error(err);
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      // Append error message to chat so user sees it
-      setMessages((m) => [
-        ...m,
-        { role: "error", content: `Failed to get AI response: ${errorMsg}` },
-      ]);
-      // Stop streaming state on error
-      setIsStreaming(false);
-    }
-  };
+  setMessages((m) => [...m, { role: "user", content: msg }]);
+  setInput("");
+  setIsStreaming(true);
+
+  try {
+    const response = await sendChat(
+      sessionId,
+      msg,
+      initialImage || undefined
+    );
+
+    setMessages((m) => [
+      ...m,
+      { role: "assistant", content: response },
+    ]);
+
+  } catch (err) {
+    console.error(err);
+
+    const errorMsg =
+      err instanceof Error ? err.message : String(err);
+
+    setMessages((m) => [
+      ...m,
+      { role: "error", content: `Failed to get AI response: ${errorMsg}` },
+    ]);
+  }
+
+  setIsStreaming(false);
+};
 
   const handleMinimize = async () => {
     const win = getCurrentWindow();
