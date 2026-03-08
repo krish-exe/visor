@@ -37,6 +37,7 @@ export default function ChatWindowStandalone({ chatId,initialImage }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
+  const [title, setTitle] = useState("AI Context Chat");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -70,7 +71,7 @@ useEffect(() => {
   ? await fileToBase64(initialImage)
   : undefined;
 
-const response = await sendChat(
+const res = await sendChat(
   sessionId,
   msg,
   imageBase64
@@ -78,9 +79,11 @@ const response = await sendChat(
 
     setMessages((m) => [
       ...m,
-      { role: "assistant", content: response },
+      { role: "assistant", content: res.aiText },
     ]);
-
+    if (res.title) {
+  setTitle(res.title);
+}
   } catch (err) {
     console.error(err);
 
@@ -148,7 +151,7 @@ const response = await sendChat(
         data-tauri-drag-region
         onMouseDown={handleHeaderMouseDown}
       >
-        <div className="chat-window-title">AI Context Chat</div>
+        <div className="chat-window-title">{title}</div>
         <div className="chat-window-controls">
           <button
             className="chat-control-button minimize-button"

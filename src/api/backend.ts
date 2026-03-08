@@ -34,5 +34,5 @@ export async function sendChat(
 
   const data = await res.json();
 
-  return data.aiText;
+  return data;
 }
