@@ -181,7 +181,7 @@ async fn create_chat_window(
         )
     )
     .title("Visor AI Chat")
-    .inner_size(300.0, 200.0)
+    .inner_size(300.0, 400.0)
     .decorations(false)
     .transparent(true)
     .shadow(false)

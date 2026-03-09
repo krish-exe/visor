@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {  emit } from "@tauri-apps/api/event";
 import { createSession, sendChat } from "../api/backend";
 import { convertFileSrc } from "@tauri-apps/api/core";
-
+import { LogicalSize } from "@tauri-apps/api/window";
 
 
 async function fileToBase64(path: string) {
@@ -40,18 +40,18 @@ export default function ChatWindowStandalone({ chatId,initialImage }: Props) {
   const [title, setTitle] = useState("AI Context Chat");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [minimized, setMinimized] = useState(false);
 
+  // ADDED
+  const mouseDownPos = useRef({ x: 0, y: 0 });
+  const mouseUpPos = useRef({ x: 0, y: 0 });
+  const originalSize = useRef({ width: 400, height: 600 });
 
   const imageUrl = initialImage ? convertFileSrc(initialImage) : null;
-  // Listen for AI streaming tokens
- 
 
-  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  
 
 useEffect(() => {
   createSession().then(id => setSessionId(id));
@@ -100,18 +100,31 @@ const res = await sendChat(
 };
 
   const handleMinimize = async () => {
-    const win = getCurrentWindow();
-    const pos = await win.outerPosition();
-    
-    // Emit event for future bubble integration
-    await emit("chat-minimized", {
-      x: pos.x,
-      y: pos.y,
-      window: win.label
-    });
-    
-    await win.hide();
-  };
+
+  const win = getCurrentWindow();
+
+  const size = await win.outerSize();
+  originalSize.current = { width: size.width, height: size.height };
+
+  await win.setAlwaysOnTop(true);
+  await win.setResizable(false);
+  await win.setSize(new LogicalSize(150, 40));
+
+  setMinimized(true);
+
+};
+
+const restoreWindow = async () => {
+
+  const win = getCurrentWindow();
+
+  await win.setAlwaysOnTop(false);
+  await win.setResizable(true);
+  await win.setSize(new LogicalSize(originalSize.current.width, originalSize.current.height));
+
+  setMinimized(false);
+
+};
 
   const handleClose = async () => {
     const win = getCurrentWindow();
@@ -119,7 +132,6 @@ const res = await sendChat(
   };
 
   const handleHeaderMouseDown = async (e: React.MouseEvent) => {
-    // Don't drag if clicking control buttons
     if ((e.target as HTMLElement).closest('.chat-control-button')) {
       return;
     }
@@ -127,7 +139,56 @@ const res = await sendChat(
     await win.startDragging();
   };
 
-  // Render full chat window
+  // ADDED
+  const handleMouseDown = (e: React.MouseEvent) => {
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    mouseUpPos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseUp = () => {
+    const dx = mouseUpPos.current.x - mouseDownPos.current.x;
+    const dy = mouseUpPos.current.y - mouseDownPos.current.y;
+
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance < 5) {
+      restoreWindow();
+    }
+  };
+
+if (minimized) {
+  return (
+    <div
+      data-tauri-drag-region
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      style={{
+        width: "100%",
+        height: "100%",
+        background: "rgba(24,24,27,0.95)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: "999px",
+        display: "flex",
+        alignItems: "center",
+        padding: "0 12px",
+        cursor: "grab",
+        fontSize: "13px",
+        color: "#e4e4e7",
+        userSelect: "none",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.35)",
+        gap: "8px"
+      }}
+    >
+      <span style={{fontSize:"10px"}}>●</span>
+      {title}
+    </div>
+  );
+}
+
   return (
     <div
       style={{
@@ -205,7 +266,6 @@ const res = await sendChat(
           );
         })}
         
-        {/* Typing indicator when AI is streaming */}
         {isStreaming && (
           <div className="chat-streaming-indicator">
             <div className="streaming-dot"></div>
@@ -217,7 +277,6 @@ const res = await sendChat(
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Attachment Bar */}
       {initialImage && (
         <div className="chat-attachment-bar">
           <div className="attachment-label">
@@ -232,7 +291,6 @@ const res = await sendChat(
         </div>
       )}
 
-      {/* Input */}
       <div className="chat-input-container">
         <textarea
           className="chat-input"
@@ -257,7 +315,6 @@ const res = await sendChat(
         </button>
       </div>
 
-      {/* Image Preview Overlay */}
       {showImagePreview && initialImage && (
         <div className="chat-image-overlay" onClick={() => setShowImagePreview(false)}>
           <div className="chat-image-overlay-content" onClick={(e) => e.stopPropagation()}>
