@@ -303,7 +303,7 @@ if (minimized) {
               send();
             }
           }}
-          placeholder="Ask about this area..."
+          placeholder="Enter Message..."
           disabled={isStreaming}
         />
         <button

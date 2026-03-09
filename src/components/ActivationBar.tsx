@@ -13,7 +13,7 @@ export default function ActivationBar({ onExtractText, onCaptureScreen, onOpenHu
           onClick={onExtractText}
           className="activation-bar-button button-extract"
         >
-          Extract Text
+          Open Chat
         </button>
         <button
           onClick={onCaptureScreen}
@@ -25,7 +25,7 @@ export default function ActivationBar({ onExtractText, onCaptureScreen, onOpenHu
           onClick={onOpenHub}
           className="activation-bar-button button-hub"
         >
-          Chat Hub
+          Past Chats
         </button>
         <button
           onClick={onExit}

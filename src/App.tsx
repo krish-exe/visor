@@ -106,7 +106,10 @@ function OverlayApp() {
         style={{ pointerEvents: 'auto' }}
       >
         <ActivationBar
-          onExtractText={() => setMode('selecting')}
+          onExtractText={async () => {
+    const chatId = `chat-${Date.now()}`;
+    await invoke("create_chat_window", { chatId });
+  }}
           onCaptureScreen={() => setMode('selecting')}
           onOpenHub={() => invoke("create_hub_window")}
           onExit={() => invoke('exit_app')}
